@@ -1,33 +1,33 @@
-// นำเข้า Express เพื่อใช้งานระบบ Routing (กำหนดเส้นทาง API)
+// นำเข้า Express เพื่อใช้งานระบบ Routing
 const express = require("express");
-// สร้างตัวแปร router เพื่อใช้จัดการเส้นทางย่อยต่างๆ
 const router = express.Router();
+
 // นำเข้า Service ที่รวมคำสั่งสำหรับยิง API ไปหา Robint
 const robint = require("../services/robintService");
 
-// ---------------------------------------------------------
-// 1. ดึงข้อมูลหุ่นยนต์ทั้งหมด
-// ---------------------------------------------------------
-// เมื่อมีคนเรียก GET /api/robots
+// ============================================================
+// ── หุ่นยนต์ (Robot) ──────────────────────────────────────
+// ============================================================
+
+/**
+ * GET /api/robots
+ * ดึงรายชื่อหุ่นยนต์ทั้งหมด (รวมจากทุกบัญชี)
+ */
 router.get("/robots", async (req, res) => {
   try {
-    // ไปเรียกใช้ฟังก์ชัน getRobotList ใน Service
     const result = await robint.getRobotList();
-    // ส่งข้อมูลที่ได้กลับไปในรูปแบบ JSON
     res.json(result);
   } catch (err) {
-    // ถ้าพัง ให้ส่ง HTTP Status 500 พร้อมข้อความแจ้งเตือน Error
     res.status(500).json({ error: err.message });
   }
 });
 
-// ---------------------------------------------------------
-// 2. ดึงข้อมูลสถานะของหุ่นยนต์แบบเจาะจง 1 ตัว
-// ---------------------------------------------------------
-// :uuid คือตัวแปรใน URL เช่น /api/robots/1234
+/**
+ * GET /api/robots/:uuid
+ * ดูข้อมูลโดยละเอียดของหุ่นยนต์ 1 ตัว (สถานะ, แบตเตอรี่, ชั้น ฯลฯ)
+ */
 router.get("/robots/:uuid", async (req, res) => {
   try {
-    // ดึงค่า uuid จาก URL (req.params.uuid) แล้วส่งไปให้ Service
     const result = await robint.getRobotDetail(req.params.uuid);
     res.json(result);
   } catch (err) {
@@ -35,9 +35,28 @@ router.get("/robots/:uuid", async (req, res) => {
   }
 });
 
-// ---------------------------------------------------------
-// 3. ดูแผนที่ทั้งหมดของโปรเจกต์
-// ---------------------------------------------------------
+/**
+ * GET /api/robots/:uuid/realtime
+ * ดูพิกัดหุ่นยนต์แบบเรียลไทม์ (X, Y, มุม, ชั้น)
+ * หมายเหตุ: มี Rate Limit 1 ครั้ง/วินาที
+ */
+router.get("/robots/:uuid/realtime", async (req, res) => {
+  try {
+    const result = await robint.getRobotRealTimePoint(req.params.uuid);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
+// ── แผนที่ (Map) ───────────────────────────────────────────
+// ============================================================
+
+/**
+ * GET /api/maps
+ * ดึงรายชื่อแผนที่ทั้งหมด (รวมจากทุกบัญชี)
+ */
 router.get("/maps", async (req, res) => {
   try {
     const result = await robint.getMapList();
@@ -47,10 +66,10 @@ router.get("/maps", async (req, res) => {
   }
 });
 
-// ---------------------------------------------------------
-// 4. ดูจุดต่างๆ ภายในแผนที่ 1 แผนที่
-// ---------------------------------------------------------
-// ต้องแนบ mapUuid ของแผนที่มาใน URL ด้วย
+/**
+ * GET /api/maps/:mapUuid/points
+ * ดูจุดต่างๆ ภายในแผนที่ 1 แผนที่ (พร้อมพิกัด X, Y)
+ */
 router.get("/maps/:mapUuid/points", async (req, res) => {
   try {
     const result = await robint.getMapPoints(req.params.mapUuid);
@@ -60,28 +79,34 @@ router.get("/maps/:mapUuid/points", async (req, res) => {
   }
 });
 
-// ---------------------------------------------------------
-// 5. เรียกหุ่นยนต์ให้มารับ (Call Robot)
-// ---------------------------------------------------------
-// ใช้ Method POST เพราะต้องมีการส่งข้อมูล (Body) มาด้วย
-router.post("/call", async (req, res) => {
+/**
+ * GET /api/rooms
+ * ดึงรายชื่อห้องและจุดทั้งหมดในโปรเจกต์ (แบ่งตามตึก/ชั้น)
+ * ใช้หาชื่อห้องและ pointUuid เพื่อประกอบการสั่ง Order
+ */
+router.get("/rooms", async (req, res) => {
   try {
-    // ดึงข้อมูล 3 อย่างจาก Body ที่ผู้ใช้ส่งมา
-    const { robotUuid, pointUuid, phone } = req.body;
-    // สั่งเรียกหุ่นยนต์ผ่าน Service
-    const result = await robint.callRobot(robotUuid, pointUuid, phone);
+    const result = await robint.getProjectRooms();
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// ---------------------------------------------------------
-// 6. สั่งให้หุ่นยนต์ไปส่งของ (Create Order)
-// ---------------------------------------------------------
+// ============================================================
+// ── Order (การส่งของ) ──────────────────────────────────────
+// ============================================================
+
+/**
+ * POST /api/order
+ * สั่งให้หุ่นยนต์ไปส่งของ
+ * Body (ส่งของในโรงแรม):
+ *   { source, thridOrderNum, phone, roomNum, callBackUrl, description?, robotUuid?, orderDetails }
+ * Body (ช่วยรับ-ส่งของ):
+ *   { source, thridOrderNum, phone, callBackUrl, deliveryType, fromPointName, toPointName, ... }
+ */
 router.post("/order", async (req, res) => {
   try {
-    // นำข้อมูล req.body ทั้งก้อน ส่งไปสร้าง Order ใน Service
     const result = await robint.createOrder(req.body);
     res.json(result);
   } catch (err) {
@@ -89,28 +114,212 @@ router.post("/order", async (req, res) => {
   }
 });
 
-// ---------------------------------------------------------
-// 7. รับการแจ้งเตือนกลับจากระบบ Robint (Callback)
-// ---------------------------------------------------------
-// เมื่อหุ่นยนต์ทำงานเสร็จหรือมีอัปเดต Robint จะยิงข้อมูลมาที่เส้นทางนี้ (Webhook)
-router.post("/callback", (req, res) => {
-  const { orderNum, state, power, taskStatus } = req.body;
-  console.log(`Order: ${orderNum} → ${state}`); // แสดงสถานะใน Console
-  // ส่งข้อมูลต่อไปยังผู้เชื่อมต่อผ่าน Socket.io (real‑time)
+/**
+ * POST /api/order/info
+ * ดูข้อมูล Order ตามเลข orderNum
+ * Body: { orderNum }
+ */
+router.post("/order/info", async (req, res) => {
   try {
-    const { io } = require("../../socket"); // ปรับ path ให้ตรงกับโครงสร้างของคุณ
-    io.emit("robotUpdate", {
-      uuid: orderNum,
-      state,
-      power,
-      taskStatus,
-    });
-  } catch (e) {
-    console.error("Socket emit error:", e);
+    const { orderNum } = req.body;
+    if (!orderNum) return res.status(400).json({ error: "orderNum is required" });
+    const result = await robint.getOrderInfo(orderNum);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-  // ตอบกลับระบบ Robint ว่าได้รับข้อมูลเรียบร้อยแล้ว
+});
+
+/**
+ * POST /api/order/operation
+ * ยกเลิก หรือเปลี่ยนเป็นส่งโดยพนักงาน
+ * Body: { orderNum, state }  (state: "CANCELLED" | "PEOPLE_DELIVERY")
+ */
+router.post("/order/operation", async (req, res) => {
+  try {
+    const { orderNum, state } = req.body;
+    if (!orderNum || !state) {
+      return res.status(400).json({ error: "orderNum and state are required" });
+    }
+    const result = await robint.operationOrder(orderNum, state);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/order/pending-count
+ * ดูจำนวน Order ที่รอการจัดส่งอยู่ในขณะนี้
+ */
+router.get("/order/pending-count", async (req, res) => {
+  try {
+    const result = await robint.getPendingDeliveryOrder();
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/order/actions
+ * ดูประวัติการเคลื่อนไหวของ Order (Delivery Tracking)
+ * Body: { orderNum }
+ */
+router.post("/order/actions", async (req, res) => {
+  try {
+    const { orderNum } = req.body;
+    if (!orderNum) return res.status(400).json({ error: "orderNum is required" });
+    const result = await robint.getOrderActions(orderNum);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
+// ── เรียกหุ่นยนต์ (Summon) ────────────────────────────────
+// ============================================================
+
+/**
+ * POST /api/call
+ * เรียกหุ่นยนต์ให้มาหา (Customer Call)
+ * Body: { robotUuid, pointUuid, phone? }
+ */
+router.post("/call", async (req, res) => {
+  try {
+    const { robotUuid, pointUuid, phone } = req.body;
+    if (!robotUuid || !pointUuid) {
+      return res.status(400).json({ error: "robotUuid and pointUuid are required" });
+    }
+    const result = await robint.callRobot(robotUuid, pointUuid, phone);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
+// ── โฆษณา (Advertisement) ─────────────────────────────────
+// ============================================================
+
+/**
+ * POST /api/ad/push
+ * ส่งไฟล์โฆษณา (รูปภาพ/วิดีโอ) ไปแสดงบนหุ่นยนต์
+ * Body: { robotUuids, callBackUrl, files: [{ filePath, fileType, playTime, sort }] }
+ */
+router.post("/ad/push", async (req, res) => {
+  try {
+    const result = await robint.pushAdFileToRobots(req.body);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
+// ── สถิติ (Statistics) ────────────────────────────────────
+// ============================================================
+
+/**
+ * POST /api/stats/tasks
+ * ดูสถิติงานของหุ่นยนต์ (จำนวนงาน / ระยะทาง / เวลา)
+ * Body: { startTime, endTime, robotUuids? }
+ */
+router.post("/stats/tasks", async (req, res) => {
+  try {
+    const { startTime, endTime, robotUuids } = req.body;
+    if (!startTime || !endTime) {
+      return res.status(400).json({ error: "startTime and endTime are required" });
+    }
+    const result = await robint.getRobotTaskStatistic(startTime, endTime, robotUuids);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/stats/orders
+ * ดูสถิติ Order (แยกตามประเภทคำสั่ง)
+ * Body: { startTime, endTime, robotUuids? }
+ */
+router.post("/stats/orders", async (req, res) => {
+  try {
+    const { startTime, endTime, robotUuids } = req.body;
+    if (!startTime || !endTime) {
+      return res.status(400).json({ error: "startTime and endTime are required" });
+    }
+    const result = await robint.getOrderStatistic(startTime, endTime, robotUuids);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/stats/task-records
+ * ดูประวัติงานของหุ่นยนต์แบบ record-by-record
+ * Body: { robotUuidList?, taskTypeList?, taskStateList?, startTime?, endTime? }
+ * หมายเหตุ: Rate Limit 1 ครั้ง/วินาที, ช่วงวันสูงสุด 1 เดือน
+ */
+router.post("/stats/task-records", async (req, res) => {
+  try {
+    const result = await robint.findRobotTaskRecords(req.body);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/stats/order-records
+ * ดูประวัติ Order ของหุ่นยนต์แบบ record-by-record
+ * Body: { robotUuidList?, startTime, endTime }
+ * หมายเหตุ: Rate Limit 1 ครั้ง/วินาที, ช่วงวันสูงสุด 1 เดือน
+ */
+router.post("/stats/order-records", async (req, res) => {
+  try {
+    const { startTime, endTime, robotUuidList } = req.body;
+    if (!startTime || !endTime) {
+      return res.status(400).json({ error: "startTime and endTime are required" });
+    }
+    const result = await robint.findRobotOrderList(startTime, endTime, robotUuidList);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
+// ── Callbacks (Webhook รับจาก Robint) ─────────────────────
+// ============================================================
+
+/**
+ * POST /api/callback/order
+ * Robint จะยิงมาที่นี่ทุกครั้งที่สถานะ Order เปลี่ยน
+ * (ต้องกำหนด callBackUrl ตรงนี้ตอนสร้าง Order)
+ */
+router.post("/callback/order", (req, res) => {
+  const { orderNum, thridOrderNum, state, msg, actionTime, orderDlvState } = req.body;
+  console.log(`[Callback] Order: ${orderNum} | thrid: ${thridOrderNum} | state: ${state} | msg: ${msg}`);
+  if (orderDlvState) {
+    console.log(`[Callback] DlvState: point=${orderDlvState.pointName}, type=${orderDlvState.dlvType}, takeOut=${orderDlvState.takeOut}`);
+  }
+  // TODO: บันทึกลงฐานข้อมูล หรือแจ้งเตือน Frontend ต่อได้ที่นี่
   res.status(200).json({ success: true });
 });
 
-// ส่งออก router ไปให้ app.js ใช้งานต่อ (ในคำสั่ง app.use("/api", ...))
+/**
+ * POST /api/callback/ad
+ * Robint จะยิงมาที่นี่เมื่อหุ่นยนต์ติดตั้งไฟล์โฆษณาเสร็จแล้ว
+ */
+router.post("/callback/ad", (req, res) => {
+  const { playGroupName, playGroupNumber, state, actionTime } = req.body;
+  console.log(`[Callback] Ad: ${playGroupName} (${playGroupNumber}) | state: ${state} | time: ${actionTime}`);
+  // TODO: บันทึกสถานะโฆษณา หรือแจ้งเตือน Frontend ต่อได้ที่นี่
+  res.status(200).json({ success: true });
+});
+
+// ส่งออก router ไปให้ app.js ใช้งาน
 module.exports = router;
